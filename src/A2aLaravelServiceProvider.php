@@ -24,13 +24,23 @@ class A2aLaravelServiceProvider extends ServiceProvider
 
     public function boot()
     {
-        // Publish config and migrations
+        // Load migrations
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
+        // Individual tags
         $this->publishes([
             __DIR__.'/../config/a2a.php' => config_path('a2a.php'),
         ], 'a2a-config');
+
         $this->publishes([
             __DIR__.'/../database/migrations/' => database_path('migrations'),
         ], 'a2a-migrations');
+
+        // Combined "a2a" tag
+        $this->publishes([
+            __DIR__.'/../config/a2a.php' => config_path('a2a.php'),
+            __DIR__.'/../database/migrations/' => database_path('migrations'),
+        ], 'a2a');
 
         // Register routes
         $this->registerRoutes();
@@ -39,11 +49,12 @@ class A2aLaravelServiceProvider extends ServiceProvider
             TaskStatusUpdated::class,
             [PushNotificationListener::class, 'handle']
         );
+
     }
 
     protected function registerRoutes()
     {
         Route::middleware('web')
-            ->group(__DIR__.'/../routes/a2a.php');
+            ->group(realpath(__DIR__.'/../routes/a2a.php'));
     }
 }

@@ -1,6 +1,7 @@
 <?php
-use Illuminate\Support\Facades\Route;
+
 use Dwoodard\A2aLaravel\Http\Controllers\PushWebhookController;
+use Illuminate\Support\Facades\Route;
 
 Route::get('/.well-known/agent.json', [\Dwoodard\A2aLaravel\Http\Controllers\AgentDiscoveryController::class, 'show']);
 Route::post('/a2a', [\Dwoodard\A2aLaravel\Http\Controllers\A2aJsonRpcController::class, 'handle']);
