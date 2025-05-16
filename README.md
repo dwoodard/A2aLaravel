@@ -17,10 +17,5 @@ composer require dwoodard/a2a-laravel
 php artisan vendor:publish --tag=a2a
 ```
 
-## Configuration
 
-After installing the package, you need to publish the configuration file. You can do this by running the following command:
 
-```bash
-php artisan vendor:publish --provider="Dwoodard\A2aLaravel\A2aServiceProvider"
-```
