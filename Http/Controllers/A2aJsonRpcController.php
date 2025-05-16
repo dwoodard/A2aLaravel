@@ -18,6 +18,17 @@ class A2aJsonRpcController extends Controller
         $method = $data['method'] ?? null;
         $id = $data['id'] ?? null;
         $params = $data['params'] ?? [];
+        // Strict JSON-RPC version validation
+        if (! isset($data['jsonrpc']) || $data['jsonrpc'] !== '2.0') {
+            return response()->json([
+                'jsonrpc' => '2.0',
+                'id' => $id ?? null,
+                'error' => [
+                    'code' => -32600,
+                    'message' => 'Invalid Request: jsonrpc version must be "2.0"',
+                ],
+            ], 400);
+        }
         $taskManager = App::make(TaskManager::class);
         $skillRegistry = app(SkillRegistry::class);
         $isAsync = $params['async'] ?? false;
