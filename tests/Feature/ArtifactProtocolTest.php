@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Dwoodard\A2aLaravel\Tests\Feature;
 
 use Dwoodard\A2aLaravel\Models\Artifact;
+use Dwoodard\A2aLaravel\Tests\TestCase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
 class ArtifactProtocolTest extends TestCase
 {

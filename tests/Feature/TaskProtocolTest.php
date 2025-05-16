@@ -6,8 +6,8 @@ namespace Dwoodard\A2aLaravel\Tests\Feature;
 
 use Dwoodard\A2aLaravel\Enums\TaskState;
 use Dwoodard\A2aLaravel\Models\Task;
+use Dwoodard\A2aLaravel\Tests\TestCase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
 class TaskProtocolTest extends TestCase
 {
