@@ -1,5 +1,6 @@
 {
-    "name": "dwoodard/A2aLaravel",
+    "name": "dwoodard/a2alaravel",
+    "version": "dev-main",
     "description": "A Laravel package implementing the A2A (Agent-to-Agent) specification, providing models, JSON-RPC endpoints, skill registry, task lifecycle management, SSE streaming, and push notification support for agent-based workflows.",
     "keywords": [
         "dwoodard",
@@ -31,11 +32,6 @@
     "autoload": {
         "psr-4": {
             "Dwoodard\\A2aLaravel\\": "src/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Dwoodard\\A2aLaravel\\Tests\\": "tests/"
         }
     },
     "scripts": {
