@@ -1,0 +1,36 @@
+# Composer dependencies
+/vendor/
+/composer.lock
+/composer.platform-check.json
+
+# PHPUnit
+/phpunit.xml
+/phpunit.xml.dist
+/.phpunit.result.cache
+/coverage/
+/coverage.xml
+
+# Laravel & Testbench
+/.env
+/.env.*
+/.env.testing
+/storage/
+/bootstrap/cache/
+
+# IDE and OS files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Node
+/node_modules/
+
+# Misc
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+/vendor-bin/

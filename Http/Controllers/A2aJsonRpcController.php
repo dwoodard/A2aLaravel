@@ -2,6 +2,7 @@
 
 namespace Dwoodard\A2aLaravel\Http\Controllers;
 
+use Dwoodard\A2aLaravel\Enums\JsonRpcErrors;
 use Dwoodard\A2aLaravel\Jobs\ExecuteSkillJob;
 use Dwoodard\A2aLaravel\Services\SkillRegistry;
 use Dwoodard\A2aLaravel\Services\TaskManager;
@@ -24,7 +25,7 @@ class A2aJsonRpcController extends Controller
                 'jsonrpc' => '2.0',
                 'id' => $id ?? null,
                 'error' => [
-                    'code' => -32600,
+                    'code' => JsonRpcErrors::INVALID_REQUEST,
                     'message' => 'Invalid Request: jsonrpc version must be "2.0"',
                 ],
             ], 400);
@@ -41,7 +42,7 @@ class A2aJsonRpcController extends Controller
                         'jsonrpc' => '2.0',
                         'id' => $id,
                         'error' => [
-                            'code' => -32602,
+                            'code' => JsonRpcErrors::INVALID_PARAMS,
                             'message' => 'Missing required params: id and message are required',
                         ],
                     ], 400);
@@ -50,35 +51,58 @@ class A2aJsonRpcController extends Controller
 
             switch ($method) {
                 case 'tasks/send':
+                    // Accept TaskSendParams fields
+                    $taskId = $params['id'];
+                    $sessionId = $params['sessionId'] ?? null;
+                    $message = $params['message'];
+                    $pushConfig = $params['pushNotification'] ?? null;
+                    $historyLength = $params['historyLength'] ?? null;
+                    $metadata = $params['metadata'] ?? null;
+
                     // If task exists, treat as continuation; else, create new
-                    $task = $taskManager->findTask($params['id'] ?? '');
+                    $task = $taskManager->findTask($taskId);
                     if ($task) {
-                        $message = $taskManager->addMessage($task, [
-                            'role' => 'user',
-                            'content' => $params['message'] ?? '',
-                        ]);
+                        $msg = $taskManager->addMessage($task, $message);
                         $taskManager->markWorking($task);
+                        // Update push notification config if provided
+                        if ($pushConfig) {
+                            $taskManager->setPushNotificationConfig($task, $pushConfig);
+                        }
                     } else {
-                        $task = $taskManager->createTask($params);
-                        $message = $task->messages()->latest()->first();
+                        $createData = [
+                            'id' => $taskId,
+                            'session_id' => $sessionId,
+                            'message' => $message,
+                            'metadata' => $metadata,
+                        ];
+                        $task = $taskManager->createTask($createData);
+                        $msg = $task->messages()->latest()->first();
                         $taskManager->markWorking($task);
+                        // Set push notification config if provided
+                        if ($pushConfig) {
+                            $taskManager->setPushNotificationConfig($task, $pushConfig);
+                        }
                     }
-                    // Skill dispatch
+                    // Skill dispatch (unchanged)
                     $skillId = $params['skill_id'] ?? ($task->metadata['skill_id'] ?? 'echo');
                     $skill = $skillRegistry->getSkillById($skillId);
                     if ($isAsync) {
                         // Dispatch to queue
-                        ExecuteSkillJob::dispatch($task->id, $message->id, $skillId);
+                        ExecuteSkillJob::dispatch($task->id, $msg->id, $skillId);
+                        // Prepare protocol array with history limit if requested
+                        $taskArr = $task->fresh(['messages', 'artifacts', 'pushNotificationConfig'])->toProtocolArray();
+                        if (is_int($historyLength) && $historyLength > 0) {
+                            $taskArr['messages'] = collect($taskArr['messages'])->sortBy('created_at')->take(-$historyLength)->values();
+                        }
 
-                        // Return immediately with working state
                         return response()->json([
                             'jsonrpc' => '2.0',
                             'id' => $id,
-                            'result' => $task->fresh(['messages', 'artifacts', 'pushNotificationConfig'])->toProtocolArray(),
+                            'result' => $taskArr,
                         ]);
                     } elseif ($skill) {
                         try {
-                            $result = $skill->execute($task, $message);
+                            $result = $skill->execute($task, $msg);
                             $taskManager->markCompleted($task, $result);
                         } catch (\Throwable $e) {
                             $taskManager->markFailed($task, $e->getMessage());
@@ -86,29 +110,40 @@ class A2aJsonRpcController extends Controller
                     } else {
                         $taskManager->markFailed($task, 'Skill not found: '.$skillId);
                     }
-
-                    return response()->json([
-                        'jsonrpc' => '2.0',
-                        'id' => $id,
-                        'result' => $task->fresh(['messages', 'artifacts', 'pushNotificationConfig'])->toProtocolArray(),
-                    ]);
-                case 'tasks/get':
-                    $task = $taskManager->findTask($params['id'] ?? '');
-                    if (! $task) {
-                        return response()->json([
-                            'jsonrpc' => '2.0',
-                            'id' => $id,
-                            'error' => [
-                                'code' => -32000,
-                                'message' => 'Task not found',
-                            ],
-                        ], 404);
+                    // Prepare protocol array with history limit if requested
+                    $taskArr = $task->fresh(['messages', 'artifacts', 'pushNotificationConfig'])->toProtocolArray();
+                    if (is_int($historyLength) && $historyLength > 0) {
+                        $taskArr['messages'] = collect($taskArr['messages'])->sortBy('created_at')->take(-$historyLength)->values();
                     }
 
                     return response()->json([
                         'jsonrpc' => '2.0',
                         'id' => $id,
-                        'result' => $task->toProtocolArray(),
+                        'result' => $taskArr,
+                    ]);
+                case 'tasks/get':
+                    $taskId = $params['id'] ?? '';
+                    $historyLength = $params['historyLength'] ?? null;
+                    $task = $taskManager->findTask($taskId);
+                    if (! $task) {
+                        return response()->json([
+                            'jsonrpc' => '2.0',
+                            'id' => $id,
+                            'error' => [
+                                'code' => JsonRpcErrors::TASK_NOT_FOUND,
+                                'message' => 'Task not found',
+                            ],
+                        ], 404);
+                    }
+                    $taskArr = $task->toProtocolArray();
+                    if (is_int($historyLength) && $historyLength > 0) {
+                        $taskArr['messages'] = collect($taskArr['messages'])->sortBy('created_at')->take(-$historyLength)->values();
+                    }
+
+                    return response()->json([
+                        'jsonrpc' => '2.0',
+                        'id' => $id,
+                        'result' => $taskArr,
                     ]);
                 case 'tasks/cancel':
                     $task = $taskManager->cancelTask($params['id'] ?? '');
@@ -117,7 +152,7 @@ class A2aJsonRpcController extends Controller
                             'jsonrpc' => '2.0',
                             'id' => $id,
                             'error' => [
-                                'code' => -32000,
+                                'code' => JsonRpcErrors::TASK_NOT_FOUND,
                                 'message' => 'Task not found',
                             ],
                         ], 404);
@@ -135,7 +170,7 @@ class A2aJsonRpcController extends Controller
                             'jsonrpc' => '2.0',
                             'id' => $id,
                             'error' => [
-                                'code' => -32000,
+                                'code' => JsonRpcErrors::TASK_NOT_FOUND,
                                 'message' => 'Task not found',
                             ],
                         ], 404);
@@ -145,7 +180,7 @@ class A2aJsonRpcController extends Controller
                             'jsonrpc' => '2.0',
                             'id' => $id,
                             'error' => [
-                                'code' => -32602,
+                                'code' => JsonRpcErrors::INVALID_PARAMS,
                                 'message' => 'Missing required pushConfig.target_url',
                             ],
                         ], 400);
@@ -164,7 +199,7 @@ class A2aJsonRpcController extends Controller
                             'jsonrpc' => '2.0',
                             'id' => $id,
                             'error' => [
-                                'code' => -32000,
+                                'code' => JsonRpcErrors::TASK_NOT_FOUND,
                                 'message' => 'Task not found',
                             ],
                         ], 404);
@@ -175,7 +210,7 @@ class A2aJsonRpcController extends Controller
                             'jsonrpc' => '2.0',
                             'id' => $id,
                             'error' => [
-                                'code' => -32001,
+                                'code' => JsonRpcErrors::PUSH_NOTIFICATION_NOT_SET,
                                 'message' => 'No push notification config set',
                             ],
                         ], 404);
@@ -191,7 +226,7 @@ class A2aJsonRpcController extends Controller
                         'jsonrpc' => '2.0',
                         'id' => $id,
                         'error' => [
-                            'code' => -32601,
+                            'code' => JsonRpcErrors::METHOD_NOT_FOUND,
                             'message' => 'Method not found',
                         ],
                     ], 400);
@@ -201,7 +236,7 @@ class A2aJsonRpcController extends Controller
                 'jsonrpc' => '2.0',
                 'id' => $id,
                 'error' => [
-                    'code' => -32603,
+                    'code' => JsonRpcErrors::INTERNAL_ERROR,
                     'message' => 'Internal error',
                     'data' => $e->getMessage(),
                 ],

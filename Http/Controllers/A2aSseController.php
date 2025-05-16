@@ -22,56 +22,117 @@ class A2aSseController extends Controller
         $skillRegistry = App::make(SkillRegistry::class);
         $isAsync = true;
 
+        // Validate required params before streaming
+        if (empty($params['id']) || empty($params['message'])) {
+            return response()->json([
+                'jsonrpc' => '2.0',
+                'id' => $id,
+                'error' => [
+                    'code' => -32602,
+                    'message' => 'Missing required params: id and message are required',
+                ],
+            ], 400);
+        }
+
         return new StreamedResponse(function () use ($params, $taskManager, $id) {
             ob_implicit_flush(true);
-            // Create or continue task
-            $task = $taskManager->findTask($params['id'] ?? '');
-            if ($task) {
-                $message = $taskManager->addMessage($task, [
-                    'role' => 'user',
-                    'content' => $params['message'] ?? '',
-                ]);
-                $taskManager->markWorking($task);
-            } else {
-                $task = $taskManager->createTask($params);
-                $message = $task->messages()->latest()->first();
-                $taskManager->markWorking($task);
-            }
-            $skillId = $params['skill_id'] ?? ($task->metadata['skill_id'] ?? 'echo');
-            // Dispatch to queue
-            ExecuteSkillJob::dispatch($task->id, $message->id, $skillId);
-            // Stream events (polling for demo; in production, use event broadcasting)
-            $lastState = null;
-            $maxWait = 30; // seconds
-            $start = time();
-            while (true) {
-                $task->refresh();
-                if ($task->state !== $lastState) {
-                    $event = [
-                        'jsonrpc' => '2.0',
-                        'id' => $id,
-                        'result' => $task->toProtocolArray(),
-                        'event' => 'state',
-                        'state' => $task->state instanceof TaskState ? $task->state->value : $task->state,
+            try {
+                $taskId = $params['id'];
+                $sessionId = $params['sessionId'] ?? null;
+                $message = $params['message'];
+                $pushConfig = $params['pushNotification'] ?? null;
+                $metadata = $params['metadata'] ?? null;
+
+                // If task exists, treat as continuation; else, create new
+                $task = $taskManager->findTask($taskId);
+                if ($task) {
+                    $msg = $taskManager->addMessage($task, $message);
+                    $taskManager->markWorking($task);
+                    if ($pushConfig) {
+                        $taskManager->setPushNotificationConfig($task, $pushConfig);
+                    }
+                } else {
+                    $createData = [
+                        'id' => $taskId,
+                        'session_id' => $sessionId,
+                        'message' => $message,
+                        'metadata' => $metadata,
                     ];
-                    echo 'data: '.json_encode($event)."\n\n";
-                    $lastState = $task->state;
+                    $task = $taskManager->createTask($createData);
+                    $msg = $task->messages()->latest()->first();
+                    $taskManager->markWorking($task);
+                    if ($pushConfig) {
+                        $taskManager->setPushNotificationConfig($task, $pushConfig);
+                    }
                 }
-                if (in_array($task->state instanceof TaskState ? $task->state->value : $task->state, [TaskState::COMPLETED->value, TaskState::FAILED->value, TaskState::CANCELED->value])) {
-                    $event = [
-                        'jsonrpc' => '2.0',
-                        'id' => $id,
-                        'result' => $task->toProtocolArray(),
-                        'event' => 'final',
-                        'final' => true,
-                    ];
-                    echo 'data: '.json_encode($event)."\n\n";
-                    break;
+                $skillId = $params['skill_id'] ?? ($task->metadata['skill_id'] ?? 'echo');
+                // Dispatch to queue
+                ExecuteSkillJob::dispatch($task->id, $msg->id, $skillId);
+
+                // Stream events (polling for demo; in production, use event broadcasting)
+                $lastState = null;
+                $lastArtifactIds = collect($task->artifacts)->pluck('id')->toArray();
+                $maxWait = 30; // seconds
+                $start = time();
+                while (true) {
+                    $task->refresh();
+                    $currentState = $task->state instanceof TaskState ? $task->state->value : $task->state;
+                    // Status update event
+                    if ($currentState !== $lastState) {
+                        $event = [
+                            'jsonrpc' => '2.0',
+                            'id' => $id,
+                            'result' => [
+                                'id' => $task->id,
+                                'status' => [
+                                    'state' => $currentState,
+                                    'metadata' => $task->metadata,
+                                ],
+                                'final' => in_array($currentState, [TaskState::COMPLETED->value, TaskState::FAILED->value, TaskState::CANCELED->value]),
+                                'metadata' => null,
+                            ],
+                        ];
+                        echo 'data: '.json_encode($event)."\n\n";
+                        $lastState = $currentState;
+                        if ($event['result']['final']) {
+                            break;
+                        }
+                    }
+                    // Artifact update event (send new artifacts)
+                    $currentArtifactIds = collect($task->artifacts)->pluck('id')->toArray();
+                    $newArtifactIds = array_diff($currentArtifactIds, $lastArtifactIds);
+                    foreach ($newArtifactIds as $artifactId) {
+                        $artifact = $task->artifacts->where('id', $artifactId)->first();
+                        if ($artifact) {
+                            $artifactEvent = [
+                                'jsonrpc' => '2.0',
+                                'id' => $id,
+                                'result' => [
+                                    'id' => $task->id,
+                                    'artifact' => method_exists($artifact, 'toProtocolArray') ? $artifact->toProtocolArray() : $artifact->toArray(),
+                                    'metadata' => null,
+                                ],
+                            ];
+                            echo 'data: '.json_encode($artifactEvent)."\n\n";
+                        }
+                    }
+                    $lastArtifactIds = $currentArtifactIds;
+                    if ((time() - $start) > $maxWait) {
+                        break;
+                    }
+                    usleep(500000); // 0.5s
                 }
-                if ((time() - $start) > $maxWait) {
-                    break;
-                }
-                usleep(500000); // 0.5s
+            } catch (\Throwable $e) {
+                $error = [
+                    'jsonrpc' => '2.0',
+                    'id' => $id,
+                    'error' => [
+                        'code' => -32603,
+                        'message' => 'Internal error',
+                        'data' => $e->getMessage(),
+                    ],
+                ];
+                echo 'data: '.json_encode($error)."\n\n";
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',

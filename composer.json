@@ -1,0 +1,52 @@
+{
+    "name": "dwoodard/a2a-laravel",
+    "description": "A Laravel package implementing the A2A (Agent-to-Agent) specification, providing models, JSON-RPC endpoints, skill registry, task lifecycle management, SSE streaming, and push notification support for agent-based workflows.",
+    "keywords": [
+        "dwoodard",
+        "a2a",
+        "laravel",
+        "agent-to-agent",
+        "json-rpc"
+    ],
+    "homepage": "https://github.com/dwoodard/a2a-laravel",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Dustin Woodard",
+            "email": "dustin.woodard@gmil.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "illuminate/support": ">=8.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^6.0",
+        "phpunit/phpunit": "^9.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dwoodard\\A2aLaravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Dwoodard\\A2aLaravel\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Dwoodard\\A2aLaravel\\A2aLaravelServiceProvider"
+            ]
+        }
+    }
+}
